@@ -1,0 +1,20 @@
+{
+  "name": "collab-list-backend",
+  "version": "1.0.0",
+  "overrides": {
+    "protobufjs": "7.2.6"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "firebase-admin": "^11.0.1",
+    "framer-motion": "^12.16.0",
+    "mongoose": "^6.8.0"
+  }
+}
