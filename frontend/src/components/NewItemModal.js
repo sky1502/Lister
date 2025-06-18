@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import api from '../api'
 
 export default function NewItemModal({
+  draft = false,
   listId,
   subCategories = [],
   onCreated,
@@ -51,19 +52,22 @@ export default function NewItemModal({
       alert('Item text is required')
       return
     }
-    try {
-      const payload = {
-        listId,
-        text: text.trim(),
-        // if custom or blank, backend handles it
-        subCategory: subCategory.trim() || undefined
-      }
-      const res = await api.post('/items', payload)
-      onCreated(res.data)
-      onClose()
-    } catch (err) {
-      alert(err.response?.data || err.message)
+    const payload = {
+      text: text.trim(),
+      subCategory: subCategory.trim() || undefined
     }
+    if (draft) {
+      // just add to draft
+      onCreated({ _id: `temp_${Date.now()}`, ...payload, addedBy: null, done: false })
+    } else {
+      try {
+        const res = await api.post('/items', { listId, ...payload })
+        onCreated(res.data)
+      } catch (err) {
+        return alert(err.response?.data || err.message)
+      }
+    }
+    onClose()
   }
 
   return (
