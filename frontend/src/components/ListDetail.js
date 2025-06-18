@@ -194,14 +194,14 @@ export default function ListDetail({ list, user, onDelete }) {
       layout
       whileHover={{ scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
-      className={`relative p-6 rounded-lg shadow-xl ${color}`}
-      style={{ minHeight: '240px' }}
+      className={`relative rounded-lg shadow-xl ${color} p-4 sm:p-6 md:p-8`}
+      style={{ minHeight: '200px' }}
     >
       {/* Delete List Button */}
       {canDelete && !editMode && (
         <button
           onClick={openConfirm}
-          className="absolute top-2 right-2 text-red-600 text-xl"
+          className="absolute top-2 right-2 text-red-600 text-lg sm:text-xl md:text-2xl p-1 sm:p-2"
           title="Delete List"
         >
           ×
@@ -215,24 +215,28 @@ export default function ListDetail({ list, user, onDelete }) {
           onClick={cancelDelete}
         >
           <div
-            className="bg-white rounded-lg p-6 w-80"
+            className="bg-white rounded-lg p-4 sm:p-6 md:p-8 w-64 sm:w-72 md:w-96"
             onClick={e => e.stopPropagation()}
           >
-            <h2 className="text-lg font-semibold mb-4">Delete list?</h2>
+            <h2 className="text-base sm:text-lg md:text-xl font-semibold mb-4">
+              Delete list?
+            </h2>
             {deleteError && (
-              <p className="text-sm text-red-500 mb-2">{deleteError}</p>
+              <p className="text-xs sm:text-sm text-red-500 mb-2">
+                {deleteError}
+              </p>
             )}
-            <div className="flex justify-end space-x-3">
+            <div className="flex justify-end space-x-2 sm:space-x-3">
               <button
                 onClick={cancelDelete}
-                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+                className="px-2 py-1 sm:px-3 sm:py-2 bg-gray-200 rounded hover:bg-gray-300 text-xs sm:text-sm"
                 disabled={deleting}
               >
                 Cancel
               </button>
               <button
                 onClick={confirmDelete}
-                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                className="px-2 py-1 sm:px-3 sm:py-2 bg-red-600 text-white rounded hover:bg-red-700 text-xs sm:text-sm"
               >
                 {deleting ? 'Deleting…' : 'Delete'}
               </button>
@@ -244,26 +248,27 @@ export default function ListDetail({ list, user, onDelete }) {
       {/* Title + Edit Controls row */}
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h3 className="text-xl font-semibold">{listState.title}</h3>
-          <div className="text-sm text-gray-600">
+          <h3 className="text-lg sm:text-xl md:text-2xl font-semibold">
+            {listState.title}
+          </h3>
+          <div className="text-xs sm:text-sm text-gray-600">
             Category: <span className="font-medium">{listState.categoryId?.name}</span>
           </div>
         </div>
-
         {canEdit && (
           editMode ? (
             <div className="flex gap-2">
               <button
                 onClick={saveEdit}
                 disabled={saving}
-                className="mb-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+                className="px-3 py-1 sm:px-4 sm:py-2 bg-green-600 text-white rounded hover:bg-green-700 text-xs sm:text-sm"
               >
                 {saving ? 'Saving…' : 'Save'}
               </button>
               <button
                 onClick={cancelEdit}
                 disabled={saving}
-                className="mb-2 px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+                className="px-3 py-1 sm:px-4 sm:py-2 bg-gray-300 rounded hover:bg-gray-400 text-xs sm:text-sm"
               >
                 Cancel
               </button>
@@ -271,7 +276,7 @@ export default function ListDetail({ list, user, onDelete }) {
           ) : (
             <button
               onClick={enterEditMode}
-              className="mb-2 px-3 py-2 bg-gray-200 rounded hover:bg-gray-300"
+              className="px-2 py-1 sm:px-3 sm:py-2 bg-gray-200 rounded hover:bg-gray-300 text-xs sm:text-sm"
             >
               Edit
             </button>
@@ -290,7 +295,7 @@ export default function ListDetail({ list, user, onDelete }) {
       )}
 
       {/* Items */}
-      <ul className="space-y-2 overflow-auto max-h-40 mb-4">
+      <ul className="space-y-1 sm:space-y-2 overflow-auto mb-4 max-h-32 sm:max-h-40 md:max-h-48">
         {displayItems.map(item => {
           const canRemoveItem = isOwner || item.addedBy === user?.uid
           const isRemoved     = itemsToRemove.has(item._id)
@@ -301,40 +306,34 @@ export default function ListDetail({ list, user, onDelete }) {
                 checked={item.done}
                 disabled={editMode || !(isOwner || collabUids.includes(user?.uid))}
                 onChange={async () => {
-                  const res = await api.put(
-                    `/items/${item._id}`,
-                    { done: !item.done }
-                  )
-                  setAllItems(a =>
-                    a.map(i => i._id === item._id ? res.data : i)
-                  )
+                  const res = await api.put(`/items/${item._id}`, { done: !item.done })
+                  setAllItems(a => a.map(i => i._id === item._id ? res.data : i))
                 }}
-                className="mr-2 h-5 w-5"
+                className="mr-2 h-4 w-4 sm:h-5 sm:w-5"
               />
               <span className={item.done ? 'line-through text-gray-500' : ''}>
                 {item.text}
               </span>
               {item.subCategory && (
-                <span className="ml-auto text-xs italic text-gray-700">
+                <span className="ml-auto text-xs sm:text-sm italic text-gray-700">
                   {item.subCategory}
                 </span>
               )}
-
               {/* Remove / Undo in edit mode */}
               {editMode && canRemoveItem && (
                 isRemoved ? (
                   <button
                     onClick={() => handleUndoRemove(item._id)}
-                    className="ml-2 text-yellow-600 text-sm"
+                    className="ml-2 text-yellow-600 text-xs sm:text-sm"
                   >
                     Undo
                   </button>
                 ) : (
                   <button
                     onClick={() => handleRemoveItem(item._id)}
-                    className="ml-2 text-red-600 text-sm"
+                    className="ml-2 text-red-600 text-xs sm:text-sm"
                   >
-                    -
+                    −
                   </button>
                 )
               )}
@@ -347,7 +346,7 @@ export default function ListDetail({ list, user, onDelete }) {
       {canEdit && editMode && (
         <button
           onClick={() => setShowNewItem(true)}
-          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-md transition mb-4"
+          className="w-full py-1 sm:py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm rounded-md transition mb-4"
         >
           + Add Item
         </button>
@@ -359,25 +358,23 @@ export default function ListDetail({ list, user, onDelete }) {
           <button
             onClick={() => setShowCollaborators(v => !v)}
             disabled={editMode}
-            className="text-sm text-gray-700 hover:underline mb-2"
+            className="text-xs sm:text-sm text-gray-700 hover:underline mb-2"
           >
             {showCollaborators ? 'Hide Collaborators' : 'Show Collaborators'}
           </button>
           {showCollaborators && (
-            <div className="bg-white p-4 rounded-md shadow-inner">
-              <h4 className="font-semibold mb-2">Collaborators</h4>
+            <div className="bg-white p-3 sm:p-4 rounded-md shadow-inner">
+              <h4 className="font-semibold mb-2 text-sm sm:text-base">Collaborators</h4>
               {collaborators.length > 0 ? (
                 <ul className="list-inside mb-2 space-y-1">
                   {collaborators.map(c => (
-                    <li key={c.uid} className="flex items-center justify-between">
-                      <span>
-                        {c.displayName || c.email?.split('@')[0] || c.uid}
-                      </span>
+                    <li key={c.uid} className="flex items-center justify-between text-xs sm:text-sm">
+                      <span>{c.displayName || c.email?.split('@')[0] || c.uid}</span>
                       {isOwner && c.uid !== ownerUid && (
                         <button
                           onClick={() => handleRemoveCollaborator(c.uid)}
                           disabled={editMode}
-                          className="text-red-500 font-bold px-2 text-lg"
+                          className="text-red-500 font-bold px-2"
                           title="Remove collaborator"
                         >
                           −
@@ -387,7 +384,7 @@ export default function ListDetail({ list, user, onDelete }) {
                   ))}
                 </ul>
               ) : (
-                <div className="text-sm text-gray-500">No collaborators</div>
+                <div className="text-xs sm:text-sm text-gray-500">No collaborators</div>
               )}
               {isOwner && (
                 <form onSubmit={handleInvite} className="flex gap-2">
@@ -397,13 +394,13 @@ export default function ListDetail({ list, user, onDelete }) {
                     onChange={e => setInviteEmail(e.target.value)}
                     placeholder="Invite by email"
                     disabled={editMode}
-                    className="flex-1 border rounded px-2 py-1"
+                    className="flex-1 border rounded px-2 py-1 text-xs sm:text-sm"
                     required
                   />
                   <button
                     type="submit"
                     disabled={editMode}
-                    className="bg-indigo-600 text-white px-4 py-1 rounded hover:bg-indigo-700 transition"
+                    className="bg-indigo-600 text-white px-3 py-1 sm:px-4 sm:py-2 rounded hover:bg-indigo-700 text-xs sm:text-sm"
                   >
                     Invite
                   </button>
@@ -416,7 +413,7 @@ export default function ListDetail({ list, user, onDelete }) {
 
       {/* Public Toggle */}
       {isOwner && (
-        <label className="inline-flex items-center text-sm mb-4">
+        <label className="inline-flex items-center text-xs sm:text-sm mb-4">
           <input
             type="checkbox"
             checked={listState.isPublic}
