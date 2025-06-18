@@ -1,22 +1,13 @@
 // backend/src/index.js
 require('dotenv').config();
-const path = require('path');
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const admin = require('firebase-admin');
-const prefRoutes = require('./routes/preferences')
+const prefRoutes = require('./routes/preferences');
 
 // import your Category model
 const Category = require('./models/Category');
-
-const serviceAccount = require(
-  path.resolve(__dirname, '..', 'serviceAccountKey.json')
-);
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -24,11 +15,18 @@ const PORT = process.env.PORT || 4000;
 // CORS & JSON
 app.use(
   cors({
-    origin: 'http://localhost:3000',
+    origin: process.env.CORS_ORIGIN,
     credentials: true
   })
 );
 app.use(express.json());
+
+// Initialize Firebase Admin with service account from environment variable
+admin.initializeApp({
+  credential: admin.credential.cert(
+    JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY)
+  )
+});
 
 // connect to MongoDB
 mongoose
@@ -59,10 +57,8 @@ async function seedDefaultCategories() {
 
   for (const name of defaultNames) {
     await Category.updateOne(
-      // match by exact name & public
       { name, isPublic: true },
       {
-        // if new, set these fields
         $setOnInsert: {
           name,
           ownerUid: adminUid,
@@ -79,9 +75,9 @@ async function seedDefaultCategories() {
 app.use('/categories', require('./routes/categories'));
 app.use('/lists',      require('./routes/lists'));
 app.use('/items',      require('./routes/items'));
-// after auth middleware:
-app.use('/preferences', prefRoutes)
+app.use('/preferences', prefRoutes);
+
 // healthcheck
 app.get('/', (_, res) => res.send('Collaborative List API is running'));
 
-app.listen(PORT, () => console.log(`Backend listening on ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Backend listening on port ${PORT}`));

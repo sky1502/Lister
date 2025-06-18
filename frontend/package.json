@@ -1,21 +1,39 @@
 {
-  "name": "collab-list-frontend",
+  "name": "lister-frontend",
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "autoprefixer": "^10.4.14",
-    "axios": "^1.4.0",
-    "firebase": "^11.8.0",
-    "framer-motion": "^12.16.0",
-    "postcss": "^8.4.23",
+    "@testing-library/jest-dom": "^5.16.5",
+    "@testing-library/react": "^13.4.0",
+    "@testing-library/user-event": "^13.5.0",
+    "axios": "^1.3.4",
+    "firebase": "^9.17.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-router-dom": "^6.3.0",
     "react-scripts": "5.0.1",
-    "tailwindcss": "^3.3.2"
+    "web-vitals": "^2.1.4",
+    "framer-motion": "^10.12.16"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.3.2",
+    "postcss": "^8.4.16",
+    "autoprefixer": "^10.4.13",
+    "eslint": "^8.40.0"
   },
   "scripts": {
-    "start": "rm -rf node_modules/.cache && react-scripts start",
-    "build": "react-scripts build"
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "lint": "eslint 'src/**/*.{js,jsx}'",
+    "audit": "npm audit",
+    "audit:fix": "npm audit fix"
+  },
+  "overrides": {
+    "nth-check": "^2.0.1",
+    "css-select": "^5.0.1",
+    "@grpc/grpc-js": "^1.8.22"
   },
   "browserslist": {
     "production": [
