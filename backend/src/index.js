@@ -5,6 +5,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const admin = require('firebase-admin');
+const prefRoutes = require('./routes/preferences')
 
 // import your Category model
 const Category = require('./models/Category');
@@ -78,7 +79,8 @@ async function seedDefaultCategories() {
 app.use('/categories', require('./routes/categories'));
 app.use('/lists',      require('./routes/lists'));
 app.use('/items',      require('./routes/items'));
-
+// after auth middleware:
+app.use('/preferences', prefRoutes)
 // healthcheck
 app.get('/', (_, res) => res.send('Collaborative List API is running'));
 

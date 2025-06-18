@@ -4,16 +4,10 @@ import { motion } from 'framer-motion'
 import api from '../api'
 import Filters from './Filters'
 import NewItemModal from './NewItemModal'
-import ListView from './ListView';
 
 const NOTE_COLORS = ['note-yellow','note-green','note-blue','note-pink']
 
-export default function ListDetail({ 
-  list, 
-  user, 
-  onDelete,
-  onStartAddItem,
-}) {
+export default function ListDetail({ list, user, onDelete }) {
   const [state, setState]               = useState(list)
   const [allItems, setAllItems]         = useState([])
   const [displayItems, setDisplayItems] = useState([])
@@ -23,30 +17,29 @@ export default function ListDetail({
   const [showCollaborators, setShowCollaborators] = useState(false)
   const [inviteEmail, setInviteEmail]   = useState('')
   const [showNewItem, setShowNewItem]   = useState(false)
+  const [editMode, setEditMode]         = useState(false)
 
   // Owner + collaborators
   const ownerUid = state.owner?.uid ?? state.ownerUid
-  const owner    = {
-    uid:         ownerUid,
-    email:       state.owner?.email,
-    displayName: state.owner?.displayName
-  }
-  const invited    = (state.collaborators || []).map(c =>
+  const invited  = (state.collaborators || []).map(c =>
     typeof c === 'string' ? { uid: c } : c
   )
-  const collaborators = [owner, ...invited]
+  const collaborators = [{ uid: ownerUid, ...state.owner }, ...invited]
   const collabUids    = collaborators.map(c => c.uid)
 
   const isOwner   = user?.uid === ownerUid
   const isCollab  = user && collabUids.includes(user.uid)
   const isAdmin   = user?.uid === process.env.REACT_APP_ADMIN_UID
-  const canEdit   = user && (isAdmin || isOwner || isCollab)
-  const canDelete = user && (isAdmin || isOwner)
+
+  // only owner/collab can edit
+  const canEdit   = isOwner || isCollab
+  // owner always, admin only for delete
+  const canDelete = (isOwner) || (isAdmin && state.isPublic)
 
   // Pastel background
   const color = NOTE_COLORS[state._id.charCodeAt(0) % NOTE_COLORS.length]
 
-  // Fetch items on mount & user change
+  // Fetch items
   useEffect(() => {
     api.get(`/items/${state._id}`)
       .then(r => {
@@ -56,14 +49,18 @@ export default function ListDetail({
       .catch(console.error)
   }, [state._id, user?.uid])
 
-  // Client-side filtering
+  // Apply filters
   useEffect(() => {
     let filtered = allItems
     if (filters.subCategory.length) {
-      filtered = filtered.filter(i => filters.subCategory.includes(i.subCategory))
+      filtered = filtered.filter(i =>
+        filters.subCategory.includes(i.subCategory)
+      )
     }
     if (filters.addedBy.length) {
-      filtered = filtered.filter(i => filters.addedBy.includes(i.addedBy))
+      filtered = filtered.filter(i =>
+        filters.addedBy.includes(i.addedBy)
+      )
     }
     if (filters.done !== undefined) {
       filtered = filtered.filter(i => i.done === filters.done)
@@ -71,6 +68,7 @@ export default function ListDetail({
     setDisplayItems(filtered)
   }, [filters, allItems])
 
+  // Invite collaborator (owner only)
   const handleInvite = async e => {
     e.preventDefault()
     if (!inviteEmail.trim()) return alert('Enter collaborator email')
@@ -86,31 +84,36 @@ export default function ListDetail({
     }
   }
 
+  // Delete list
   const handleDeleteList = async () => {
     if (!window.confirm('Delete this list?')) return
     await api.delete(`/lists/${state._id}`)
     onDelete(state._id)
   }
 
+  // Toggle public (owner only)
   const handlePublicToggle = async e => {
-    const isPublic = e.target.checked
-    const res = await api.put(`/lists/${state._id}`, { isPublic })
-    setState(prev => ({ ...prev, isPublic: res.data.isPublic }))
+    const res = await api.put(
+      `/lists/${state._id}`,
+      { isPublic: e.target.checked }
+    )
+    setState(s => ({ ...s, isPublic: res.data.isPublic }))
   }
 
-  const subCats = Array.from(new Set(allItems.map(i => i.subCategory).filter(Boolean)))
+  // Remove one item (edit mode)
+  const handleRemoveItem = async itemId => {
+    if (!window.confirm('Remove this item?')) return
+    await api.delete(`/items/${itemId}`)
+    setAllItems(a => a.filter(i => i._id !== itemId))
+  }
 
+  // Open NewItem modal
+  const handleOpenNewItem = () => setShowNewItem(true)
+
+  const subCats = state.categoryId?.subCategories || []
   const collaboratorNames = invited.map(c =>
-    c.displayName ||
-    c.email?.split('@')[0].replace(/^\w/, w => w.toUpperCase()) ||
-    c.uid
+    c.displayName || c.email?.split('@')[0] || c.uid
   )
-
-  const handleOpenNewItem = () => {
-    if (onStartAddItem) 
-      onStartAddItem()
-    setShowNewItem(true)
-  };
 
   return (
     <motion.div
@@ -120,24 +123,39 @@ export default function ListDetail({
       className={`relative p-6 rounded-lg shadow-xl ${color}`}
       style={{ minHeight: '240px' }}
     >
-      {/* Delete List button now in top-right */}
-      {canDelete && (
-        <button
-          onClick={handleDeleteList}
-          className="absolute top-2 right-2 text-red-600 hover:underline text-sm"
-        >
-          Delete
-        </button>
-      )}
 
       {/* Title & Category */}
-      <h3 className="text-xl font-semibold mb-2">{state.title}</h3>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xl font-semibold">{state.title}</h3>
+        <div className="flex items-center justify-between gap-2">
+          {canEdit && (
+            <button
+              onClick={() => setEditMode(e => !e)}
+              className={`text-sm px-3 py-1 rounded ${
+                editMode ? 'bg-green-600 text-green-100' : 'bg-gray-200'
+              }`}
+            >
+              {editMode ? 'Save List' : 'Edit List'}
+            </button>
+          )}
+          {/* Delete List (owner always, admin only on public) */}
+          {canDelete && (
+            <button
+              onClick={handleDeleteList}
+              className="text-sm px-3 py-1 bg-red-500 text-green-100 rounded hover:underline text-sm"
+            >
+              Delete
+            </button>
+          )}
+        </div>
+      </div>
+
       <div className="text-sm text-gray-600 mb-4">
         Category: <span className="font-medium">{state.categoryId?.name}</span>
       </div>
 
-      {/* Filters */}
-      {canEdit && (
+      {/* Filters (only outside edit mode) */}
+      {canEdit && !editMode && (
         <Filters
           subCategories={subCats}
           collaborators={collaborators}
@@ -146,22 +164,31 @@ export default function ListDetail({
         />
       )}
 
-      {/* Items List */}
+      {/* Items */}
       <ul className="space-y-2 overflow-auto max-h-40 mb-4">
         {displayItems.map(item => (
           <li key={item._id} className="flex items-center">
+            {editMode && (
+              <button
+                onClick={() => handleRemoveItem(item._id)}
+                className="mr-2 text-red-500 font-bold"
+                title="Remove item"
+              >
+                −
+              </button>
+            )}
             <input
               type="checkbox"
               checked={item.done}
-              disabled={!canEdit}
+              disabled={!canEdit || editMode}
               onChange={async () => {
                 const res = await api.put(
                   `/items/${item._id}`,
                   { done: !item.done }
                 )
-                setAllItems(prev => prev.map(i =>
-                  i._id === item._id ? res.data : i
-                ))
+                setAllItems(a =>
+                  a.map(i => (i._id === item._id ? res.data : i))
+                )
               }}
               className="mr-2 h-5 w-5"
             />
@@ -177,8 +204,8 @@ export default function ListDetail({
         ))}
       </ul>
 
-      {/* Add Item */}
-      {canEdit && (
+      {/* Add Item (only in edit mode) */}
+      {canEdit && editMode && (
         <button
           onClick={handleOpenNewItem}
           className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-md transition mb-4"
@@ -187,7 +214,7 @@ export default function ListDetail({
         </button>
       )}
 
-      {/* Collaborators Section */}
+      {/* Collaborators (owner/collab only) */}
       {(isOwner || isCollab) && (
         <div className="mb-4">
           <button
@@ -206,7 +233,9 @@ export default function ListDetail({
                   ))}
                 </ul>
               ) : (
-                <div className="text-sm text-gray-500 mb-2">No collaborators</div>
+                <div className="text-sm text-gray-500 mb-2">
+                  No collaborators
+                </div>
               )}
               {isOwner && (
                 <form onSubmit={handleInvite} className="flex gap-2">
@@ -231,7 +260,7 @@ export default function ListDetail({
         </div>
       )}
 
-      {/* Public Toggle */}
+      {/* Public Toggle (owner only) */}
       {isOwner && (
         <label className="inline-flex items-center text-sm">
           <input

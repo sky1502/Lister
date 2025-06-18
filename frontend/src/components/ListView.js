@@ -1,45 +1,71 @@
-import React, { useState, useEffect } from 'react';
-import api from '../api';
-import NewListModal from './NewListModal';
-import ListDetail from './ListDetail';
-import CategoryManager from './CategoryManager';
+// frontend/src/components/ListView.js
+import React, { useState, useEffect } from 'react'
+import api from '../api'
+import NewListModal from './NewListModal'
+import ListDetail from './ListDetail'
+import CategoryManager from './CategoryManager'
 
 export default function ListView({ user }) {
-  const [lists, setLists]           = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [categoryFilter, setCategoryFilter] = useState('');
-  const [showPublic, setShowPublic] = useState(true);
-  const [showNewList, setShowNewList] = useState(false);
-  const [showCatManager, setShowCatManager] = useState(false);
+  const [lists, setLists] = useState([])
+  const [categories, setCategories] = useState([])
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [showPublic, setShowPublic] = useState(true)
+  const [showNewList, setShowNewList] = useState(false)
+  const [showCatManager, setShowCatManager] = useState(false)
 
-  const isAdmin = user?.uid === process.env.REACT_APP_ADMIN_UID;
+  const isAdmin = user?.uid === process.env.REACT_APP_ADMIN_UID
 
+  // Load categories once
   useEffect(() => {
     api.get('/categories')
-    .then(r => setCategories(r.data))
-    .catch(err => console.error('Error fetching categories:', err));
-  }, []);
+      .then(res => setCategories(res.data))
+      .catch(console.error)
+  }, [])
 
+  // Load lists whenever filter or user changes
   useEffect(() => {
-    const params = {};
-    if (categoryFilter) params.categoryId = categoryFilter;
+    const params = {}
+    if (categoryFilter) params.categoryId = categoryFilter
     api.get('/lists', { params })
-    .then(r => setLists(r.data))
-    .catch(err => console.error('Error fetching lists:', err));
-  }, [categoryFilter, user]);
+      .then(res => setLists(res.data))
+      .catch(console.error)
+  }, [categoryFilter, user])
 
-  const visible = lists.filter(l => {
-    const ownerUid = l.owner?.uid ?? l.ownerUid;
-    const collabs  = (l.collaborators || []).map(c => c.uid || c);
-    const isOwner  = user?.uid === ownerUid;
-    const isCollab = user && collabs.includes(user.uid);
-    if (isOwner || isCollab) return true;
-    return l.isPublic && showPublic;
-  });
+  // Load persisted "showPublic" preference from DB
+  useEffect(() => {
+    if (user) {
+      api.get('/preferences')
+        .then(res => setShowPublic(res.data.showPublic))
+        .catch(() => setShowPublic(true))
+    } else {
+      setShowPublic(true)
+    }
+  }, [user])
 
-  const handleListStartAddItem = () => {
+  // Persist "showPublic" toggle to DB
+  const handleShowPublicChange = e => {
+    const val = e.target.checked
+    setShowPublic(val)
+    if (user) {
+      api.put('/preferences', { showPublic: val })
+        .catch(console.error)
+    }
+  }
+
+  // Ensure NewListModal is closed when adding an item
+  const handleStartAddItem = () => {
     setShowNewList(false)
   }
+
+  // Determine which lists to show
+  const visible = lists.filter(l => {
+    const ownerUid = l.owner?.uid ?? l.ownerUid
+    const collabs = (l.collaborators || []).map(c => c.uid || c)
+    const isOwner = user?.uid === ownerUid
+    const isCollab = user && collabs.includes(user.uid)
+    if (isOwner || isCollab) return true
+    return l.isPublic && showPublic
+  })
 
   return (
     <>
@@ -62,15 +88,17 @@ export default function ListView({ user }) {
           </button>
         )}
 
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={showPublic}
-            onChange={e => setShowPublic(e.target.checked)}
-            className="h-4 w-4"
-          />
-          Show Public
-        </label>
+        {user && (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={showPublic}
+              onChange={handleShowPublicChange}
+              className="h-4 w-4"
+            />
+            Show Public
+          </label>
+        )}
 
         <label className="flex items-center gap-2 text-sm">
           Category:
@@ -81,7 +109,9 @@ export default function ListView({ user }) {
           >
             <option value="">All</option>
             {categories.map(c => (
-              <option key={c._id} value={c._id}>{c.name}</option>
+              <option key={c._id} value={c._id}>
+                {c.name}
+              </option>
             ))}
           </select>
         </label>
@@ -102,7 +132,7 @@ export default function ListView({ user }) {
             list={list}
             user={user}
             onDelete={id => setLists(prev => prev.filter(l => l._id !== id))}
-            onStartAddItem={handleListStartAddItem}
+            onStartAddItem={handleStartAddItem}
           />
         ))}
       </div>
@@ -110,14 +140,10 @@ export default function ListView({ user }) {
       {showNewList && (
         <NewListModal
           categories={categories}
-          onCreated={list => {
-            setLists(prev => [list, ...prev]);
-            setShowNewList(false);
-          }}
+          onCreated={list => setLists(prev => [list, ...prev])}
           onClose={() => setShowNewList(false)}
-          
         />
       )}
     </>
-  );
+  )
 }

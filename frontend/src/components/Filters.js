@@ -53,7 +53,7 @@ export default function Filters({
       <div className="relative" ref={refs.sub}>
         <button
           onClick={() => toggle('sub')}
-          className="bg-gray-200 px-3 py-1 rounded"
+          className="text-sm bg-gray-200 px-3 py-1 rounded"
         >
           Subcategories ({filters.subCategory.length || 'All'})
         </button>
@@ -84,7 +84,7 @@ export default function Filters({
       <div className="relative" ref={refs.user}>
         <button
           onClick={() => toggle('user')}
-          className="bg-gray-200 px-3 py-1 rounded"
+          className="text-sm bg-gray-200 px-3 py-1 rounded"
         >
           Users ({filters.addedBy.length || 'All'})
         </button>
@@ -115,7 +115,7 @@ export default function Filters({
       <div className="relative" ref={refs.status}>
         <button
           onClick={() => toggle('status')}
-          className="bg-gray-200 px-3 py-1 rounded"
+          className="text-sm bg-gray-200 px-3 py-1 rounded"
         >
           Status: {filters.done === undefined
             ? 'All'

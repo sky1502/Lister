@@ -1,12 +1,15 @@
 // backend/src/routes/lists.js
 const express = require('express');
-const router = express.Router();
-const admin = require('firebase-admin');
-const List = require('../models/List');
-const Item = require('../models/Item');
+const router  = express.Router();
+const admin   = require('firebase-admin');
+const List    = require('../models/List');
+const Item    = require('../models/Item');
+const Category = require('../models/Category') 
 const { authenticate, optionalAuth } = require('../middlewares/auth');
 
-// Helper: enrich raw list docs with owner & collaborator email/displayName
+/**
+ * Helper: enrich raw list docs with owner & collaborator email/displayName
+ */
 async function enrichLists(docs) {
   // collect unique UIDs
   const uidSet = new Set();
@@ -19,14 +22,19 @@ async function enrichLists(docs) {
   });
   const uids = Array.from(uidSet);
 
-  // batch‐fetch user records, but fail gracefully
+  // batch‐fetch Firebase user records
   let users = [];
   if (uids.length) {
     try {
-      const result = await admin.auth().getUsers(uids.map(uid => ({ uid })));
+      const result = await admin
+        .auth()
+        .getUsers(uids.map(uid => ({ uid })));
       users = result.users;
     } catch (err) {
-      console.error('⚠️ enrichLists: getUsers failed, falling back to UIDs', err);
+      console.error(
+        '⚠️ enrichLists: getUsers failed, falling back to UIDs',
+        err
+      );
       users = [];
     }
   }
@@ -37,7 +45,7 @@ async function enrichLists(docs) {
     return m;
   }, {});
 
-  // rebuild each list
+  // rebuild each list object
   return docs.map(l => ({
     ...l,
     owner: {
@@ -46,18 +54,20 @@ async function enrichLists(docs) {
       displayName: userMap[l.ownerUid]?.displayName || null
     },
     collaborators: (l.collaborators || []).map(c => {
-      const cuid = typeof c === 'string' ? c : c.uid;
+      const uid = typeof c === 'string' ? c : c.uid;
       return {
-        uid:         cuid,
-        email:       userMap[cuid]?.email || null,
-        displayName: userMap[cuid]?.displayName || null
+        uid,
+        email:       userMap[uid]?.email || null,
+        displayName: userMap[uid]?.displayName || null
       };
     })
   }));
 }
 
-// PUBLIC GET /lists
-// visible: public OR owned OR collaborated
+/**
+ * GET /lists
+ * Public: see all isPublic OR owned OR collaborated
+ */
 router.get('/', optionalAuth, async (req, res) => {
   try {
     const uid = req.user?.uid;
@@ -89,34 +99,72 @@ router.get('/', optionalAuth, async (req, res) => {
   }
 });
 
-// All mutation routes require authentication
+// All mutation routes require a logged-in user
 router.use(authenticate);
 
-// POST /lists → create a new list
+/**
+ * POST /lists
+ * Creates a list.  Body may be { title, categoryName?, isPublic }.
+ *  - If categoryName missing or blank ⇒ use “Other”
+ *  - Else: case-insensitive lookup; if not found, create it.
+ */
 router.post('/', async (req, res) => {
   try {
-    const { title, categoryId, isPublic } = req.body;
-    const list = new List({
-      title:        title.trim(),
-      categoryId,
-      isPublic:     !!isPublic,
-      ownerUid:     req.user.uid,
-      collaborators:[]
-    });
-    const saved = await list.save();
-    return res.status(201).json(saved);
-  } catch (err) {
-    console.error('POST /lists error:', err);
-    return res.status(400).send(err.message);
-  }
-});
+    const uid = req.user.uid
+    const { title, categoryName, isPublic } = req.body
 
-// PUT /lists/:id → update a list (owner only)
+    // 1) validate title
+    if (!title?.trim()) {
+      return res.status(400).send('Title required')
+    }
+    const t = title.trim()
+
+    // 2) determine category
+    const rawName = (categoryName || '').trim() || 'Other'
+    // case-insensitive exact match
+    let cat = await Category.findOne({
+      name: { $regex: `^${rawName}$`, $options: 'i' }
+    })
+    if (!cat) {
+      // create new category
+      cat = new Category({
+        name: rawName,
+        ownerUid: uid,
+        isPublic: true
+      })
+      await cat.save()
+    }
+
+    // 3) build & save list
+    const list = new List({
+      title:        t,
+      categoryId:   cat._id,
+      isPublic:     !!isPublic,
+      ownerUid:     uid,
+      collaborators:[]
+    })
+    const saved = await list.save()
+    return res.status(201).json(saved)
+
+  } catch (err) {
+    console.error('POST /lists error:', err)
+    return res.status(400).send(err.message)
+  }
+})
+
+/**
+ * PUT /lists/:id
+ * Update list metadata (OWNER ONLY)
+ */
 router.put('/:id', async (req, res) => {
   try {
     const list = await List.findById(req.params.id);
     if (!list) return res.status(404).send('List not found');
-    if (list.ownerUid !== req.user.uid) return res.status(403).send('Forbidden');
+
+    // Only the owner may update
+    if (list.ownerUid !== req.user.uid) {
+      return res.status(403).send('Forbidden');
+    }
 
     const { title, categoryId, isPublic } = req.body;
     if (title      !== undefined) list.title      = title.trim();
@@ -131,31 +179,38 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// DELETE /lists/:id → admin can delete any; owner only if no foreign items
+/**
+ * DELETE /lists/:id
+ * OWNER can delete (if no foreign items),
+ * ADMIN can delete only public lists
+ */
 router.delete('/:id', async (req, res) => {
   try {
     const list = await List.findById(req.params.id);
     if (!list) return res.status(404).send('List not found');
 
-    const uid = req.user.uid;
-    const isAdmin = uid === process.env.ADMIN_UID;
-    const isOwner = list.ownerUid === uid;
+    const uid       = req.user.uid;
+    const isOwner   = list.ownerUid === uid;
+    const isAdmin   = uid === process.env.ADMIN_UID;
     const foreignCount = await Item.countDocuments({
       listId:  list._id,
       addedBy: { $ne: list.ownerUid }
     });
 
-    if (isAdmin || (isOwner && foreignCount === 0)) {
+    // Owner deletes if no one else added items
+    if (isOwner && foreignCount === 0) {
       await Item.deleteMany({ listId: list._id });
       await list.remove();
       return res.sendStatus(204);
     }
 
-    if (isOwner) {
-      return res
-        .status(403)
-        .send('Cannot delete your list while other users have added items.');
+    // Admin deletes public lists only
+    if (isAdmin && list.isPublic) {
+      await Item.deleteMany({ listId: list._id });
+      await list.remove();
+      return res.sendStatus(204);
     }
+
     return res.status(403).send('Forbidden');
   } catch (err) {
     console.error('DELETE /lists/:id error:', err);
@@ -163,15 +218,17 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// POST /lists/:id/collaborators → invite by email or UID (owner/admin)
+/**
+ * POST /lists/:id/collaborators
+ * Invite collaborator by email or UID (OWNER ONLY)
+ */
 router.post('/:id/collaborators', async (req, res) => {
   try {
     const list = await List.findById(req.params.id);
     if (!list) return res.status(404).send('List not found');
 
-    const uid = req.user.uid;
-    const isAdmin = uid === process.env.ADMIN_UID;
-    if (list.ownerUid !== uid && !isAdmin) {
+    // Only owner may invite
+    if (list.ownerUid !== req.user.uid) {
       return res.status(403).send('Forbidden');
     }
 
@@ -195,23 +252,30 @@ router.post('/:id/collaborators', async (req, res) => {
   }
 });
 
-// DELETE /lists/:id/collaborators/:collabUid → remove collaborator (owner/admin)
+/**
+ * DELETE /lists/:id/collaborators/:collabUid
+ * Remove collaborator (OWNER ONLY)
+ */
 router.delete('/:id/collaborators/:collabUid', async (req, res) => {
   try {
     const list = await List.findById(req.params.id);
     if (!list) return res.status(404).send('List not found');
 
-    const uid = req.user.uid;
-    const isAdmin = uid === process.env.ADMIN_UID;
-    if (list.ownerUid !== uid && !isAdmin) {
+    // Only owner may remove
+    if (list.ownerUid !== req.user.uid) {
       return res.status(403).send('Forbidden');
     }
 
-    list.collaborators = list.collaborators.filter(u => u !== req.params.collabUid);
+    list.collaborators = list.collaborators.filter(
+      u => u !== req.params.collabUid
+    );
     await list.save();
     return res.json(list);
   } catch (err) {
-    console.error('DELETE /lists/:id/collaborators/:collabUid error:', err);
+    console.error(
+      'DELETE /lists/:id/collaborators/:collabUid error:',
+      err
+    );
     return res.status(400).send(err.message);
   }
 });

@@ -1,5 +1,5 @@
 // frontend/src/components/NewItemModal.js
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import api from '../api'
 
 export default function NewItemModal({
@@ -8,8 +8,42 @@ export default function NewItemModal({
   onCreated,
   onClose
 }) {
-  const [text, setText]             = useState('')
+  const [text, setText]               = useState('')
   const [subCategory, setSubCategory] = useState('')
+  const [filtered, setFiltered]       = useState([])
+  const [showSug, setShowSug]         = useState(false)
+  const wrapperRef = useRef(null)
+
+  // Sort subCategories alphabetically
+  const sorted = [...subCategories].sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: 'base' })
+  )
+
+  // Update suggestions as user types
+  useEffect(() => {
+    const q = subCategory.trim().toLowerCase()
+    setFiltered(
+      q
+        ? sorted.filter(sc => sc.toLowerCase().includes(q))
+        : sorted
+    )
+  }, [subCategory, sorted])
+
+  // Close suggestions on mousedown outside
+  useEffect(() => {
+    const handler = e => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setShowSug(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const handleSelect = val => {
+    setSubCategory(val)
+    setShowSug(false)
+  }
 
   const handleSubmit = async e => {
     e.preventDefault()
@@ -21,6 +55,7 @@ export default function NewItemModal({
       const payload = {
         listId,
         text: text.trim(),
+        // if custom or blank, backend handles it
         subCategory: subCategory.trim() || undefined
       }
       const res = await api.post('/items', payload)
@@ -32,15 +67,10 @@ export default function NewItemModal({
   }
 
   return (
-    // 1) Clicking on this overlay will call onClose()
     <div
       className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50"
       onClick={onClose}
     >
-      {/* 
-        2) Stop clicks inside the form from bubbling up to the overlay
-        so the modal stays open while you interact with it 
-      */}
       <form
         onClick={e => e.stopPropagation()}
         onSubmit={handleSubmit}
@@ -57,20 +87,38 @@ export default function NewItemModal({
           required
         />
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Sub-category</label>
+        <div className="relative" ref={wrapperRef}>
+          <label className="block text-sm font-medium mb-1">
+            Sub-category (optional)
+          </label>
           <input
-            list="subcats"
+            type="text"
             className="w-full border rounded px-2 py-1"
-            placeholder="Select or type new"
+            placeholder="Type or select"
             value={subCategory}
-            onChange={e => setSubCategory(e.target.value)}
+            onChange={e => {
+              setSubCategory(e.target.value)
+              setShowSug(true)
+            }}
+            onFocus={() => setShowSug(true)}
           />
-          <datalist id="subcats">
-            {subCategories.map(sc => (
-              <option key={sc} value={sc} />
-            ))}
-          </datalist>
+          {showSug && (
+            <ul className="absolute z-10 bg-white border w-full max-h-40 overflow-auto mt-1 rounded">
+              {filtered.length > 0 ? (
+                filtered.map(sc => (
+                  <li
+                    key={sc}
+                    onClick={() => handleSelect(sc)}
+                    className="px-2 py-1 hover:bg-gray-100 cursor-pointer"
+                  >
+                    {sc}
+                  </li>
+                ))
+              ) : (
+                <li className="px-2 py-1 text-gray-500">No matches</li>
+              )}
+            </ul>
+          )}
         </div>
 
         <div className="flex justify-end gap-2">
