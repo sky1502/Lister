@@ -1,5 +1,5 @@
 // frontend/src/components/ListDetail.js
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import api from '../api'
 import Filters from './Filters'
@@ -8,110 +8,185 @@ import NewItemModal from './NewItemModal'
 const NOTE_COLORS = ['note-yellow','note-green','note-blue','note-pink']
 
 export default function ListDetail({ list, user, onDelete }) {
-  const [listState, setListState]       = useState(list)
-  const [allItems, setAllItems]         = useState([])
-  const [draftItems, setDraftItems]     = useState([])
-  const [toRemove, setToRemove]         = useState(new Set())
-  const [toAdd, setToAdd]               = useState([])
-  const [toToggle, setToToggle]         = useState(new Map())
+  // Live list & items state
+  const [listState, setListState] = useState(list)
+  const [allItems, setAllItems]   = useState([])
 
+  // Draft snapshots & staged removals
+  const draftListRef    = useRef(null)
+  const draftItemsRef   = useRef(null)
+  const [itemsToRemove, setItemsToRemove] = useState(new Set())
+
+  // Filters & what to display
   const [filters, setFilters]           = useState({ subCategory: [], addedBy: [], done: undefined })
   const [displayItems, setDisplayItems] = useState([])
 
+  // UI toggles
   const [showCollaborators, setShowCollaborators] = useState(false)
   const [inviteEmail, setInviteEmail]             = useState('')
   const [showNewItem, setShowNewItem]             = useState(false)
-  const [editMode, setEditMode]                   = useState(false)
 
+  // Edit mode & saving
+  const [editMode, setEditMode] = useState(false)
+  const [saving, setSaving]     = useState(false)
+
+  // Delete-list confirmation modal
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [deleting, setDeleting]       = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
+  // Permissions setup
   const ownerUid = listState.owner?.uid ?? listState.ownerUid
-  const invited  = (listState.collaborators || []).map(c => typeof c === 'string' ? { uid: c } : c)
+  const invited  = (listState.collaborators || []).map(c =>
+    typeof c === 'string' ? { uid: c } : c
+  )
   const collaborators = [{ uid: ownerUid, ...listState.owner }, ...invited]
   const collabUids    = collaborators.map(c => c.uid)
 
-  const isOwner   = user?.uid === ownerUid
-  const isCollab  = user && collabUids.includes(user.uid)
-  const isAdmin   = user?.uid === process.env.REACT_APP_ADMIN_UID
+  const isOwner  = user?.uid === ownerUid
+  const isCollab = user && collabUids.includes(user.uid)
+  const isAdmin  = user?.uid === process.env.REACT_APP_ADMIN_UID
 
   const canEdit   = isOwner || isCollab
   const canDelete = isOwner || (isAdmin && listState.isPublic)
 
   const color = NOTE_COLORS[listState._id.charCodeAt(0) % NOTE_COLORS.length]
 
-  // Load items from server
+  // Load items from server & snapshot
   useEffect(() => {
     api.get(`/items/${listState._id}`)
-      .then(r => setAllItems(r.data))
+      .then(r => {
+        setAllItems(r.data)
+        draftItemsRef.current = r.data.slice()
+      })
       .catch(console.error)
   }, [listState._id, user?.uid])
 
-  // Build displayItems (ignores draft logic for brevity)
+  // Recompute displayItems on changes, excluding staged removals
   useEffect(() => {
-    let arr = allItems
-    if (filters.subCategory.length) {
+    let arr = allItems.filter(i => !itemsToRemove.has(i._id))
+    if (filters.subCategory.length)
       arr = arr.filter(i => filters.subCategory.includes(i.subCategory))
-    }
-    if (filters.addedBy.length) {
+    if (filters.addedBy.length)
       arr = arr.filter(i => filters.addedBy.includes(i.addedBy))
-    }
-    if (filters.done !== undefined) {
+    if (filters.done !== undefined)
       arr = arr.filter(i => i.done === filters.done)
-    }
     setDisplayItems(arr)
-  }, [allItems, filters])
+  }, [allItems, filters, itemsToRemove])
 
   // Invite collaborator
   const handleInvite = async e => {
     e.preventDefault()
     if (!inviteEmail.trim()) return alert('Enter collaborator email')
     try {
-      const res = await api.post(
+      await api.post(
         `/lists/${listState._id}/collaborators`,
         { email: inviteEmail.trim() }
       )
-      setListState(res.data)
-      setInviteEmail('')
+      window.location.reload()
     } catch (err) {
       alert(err.response?.data || err.message)
     }
   }
 
-  // Remove collaborator + refresh
+  // Remove collaborator
   const handleRemoveCollaborator = async uid => {
     try {
       await api.delete(
         `/lists/${listState._id}/collaborators/${uid}`
       )
-      // full reload to reflect changes
       window.location.reload()
     } catch (err) {
-      console.error('Failed to remove collaborator', err)
+      console.error(err)
       alert(err.response?.data || err.message)
     }
   }
 
-  // Delete list with confirmation
-  const handleDeleteList = async () => {
-    if (!window.confirm('Are you sure you want to delete this list?')) return
-    await api.delete(`/lists/${listState._id}`)
-    onDelete(listState._id)
+  // Enter edit mode: snapshot everything
+  const enterEditMode = () => {
+    draftListRef.current  = { ...listState }
+    draftItemsRef.current = allItems.slice()
+    setItemsToRemove(new Set())
+    setEditMode(true)
   }
 
-  // Toggle public
-  const handlePublicToggle = async e => {
-    const res = await api.put(
-      `/lists/${listState._id}`,
-      { isPublic: e.target.checked }
-    )
-    setListState(s => ({ ...s, isPublic: res.data.isPublic }))
+  // Cancel edit: restore snapshots
+  const cancelEdit = () => {
+    setListState(draftListRef.current)
+    setAllItems(draftItemsRef.current)
+    setItemsToRemove(new Set())
+    setEditMode(false)
+    setSaving(false)
   }
 
-  // Add item modal
+  // Save edits: delete staged items then persist public-toggle and refresh
+  const saveEdit = async () => {
+    setSaving(true)
+    try {
+      if (itemsToRemove.size > 0) {
+        await Promise.all(
+          Array.from(itemsToRemove).map(id =>
+            api.delete(`/items/${id}`)
+          )
+        )
+      }
+      if (listState.isPublic !== draftListRef.current.isPublic) {
+        const res = await api.put(
+          `/lists/${listState._id}`,
+          { isPublic: listState.isPublic }
+        )
+        setListState(s => ({ ...s, isPublic: res.data.isPublic }))
+      }
+      setItemsToRemove(new Set())
+      setEditMode(false)
+      window.location.reload()
+    } catch (err) {
+      console.error(err)
+      alert('Failed to save changes.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Stage item removal / undo
+  const handleRemoveItem = id => {
+    setItemsToRemove(s => new Set(s).add(id))
+  }
+  const handleUndoRemove = id => {
+    setItemsToRemove(s => {
+      const next = new Set(s)
+      next.delete(id)
+      return next
+    })
+  }
+
+  // Delete-list modal controls
+  const openConfirm = () => { setDeleteError(''); setShowConfirm(true) }
+  const cancelDelete = () => { setShowConfirm(false); setDeleting(false) }
+  const confirmDelete = async () => {
+    setDeleting(true)
+    try {
+      await api.delete(`/lists/${listState._id}`)
+      setShowConfirm(false)
+      onDelete(listState._id)
+    } catch (e) {
+      console.error(e)
+      setDeleteError('Failed to delete.')
+      setDeleting(false)
+    }
+  }
+
+  // Toggle public locally in editMode
+  const handlePublicToggle = e => {
+    setListState(s => ({ ...s, isPublic: e.target.checked }))
+  }
+
+  // New item creation
   const handleNewItemCreated = item => {
     setAllItems(a => [item, ...a])
     setShowNewItem(false)
   }
 
-  // Sub-categories from category
   const subCats = listState.categoryId?.subCategories || []
 
   return (
@@ -122,10 +197,10 @@ export default function ListDetail({ list, user, onDelete }) {
       className={`relative p-6 rounded-lg shadow-xl ${color}`}
       style={{ minHeight: '240px' }}
     >
-      {/* Delete List */}
+      {/* Delete List Button */}
       {canDelete && !editMode && (
         <button
-          onClick={handleDeleteList}
+          onClick={openConfirm}
           className="absolute top-2 right-2 text-red-600 text-xl"
           title="Delete List"
         >
@@ -133,32 +208,76 @@ export default function ListDetail({ list, user, onDelete }) {
         </button>
       )}
 
-      {/* Title & Category */}
-      <h3 className="text-xl font-semibold mb-2">{listState.title}</h3>
-      <div className="text-sm text-gray-600 mb-4">
-        Category: <span className="font-medium">{listState.categoryId?.name}</span>
-      </div>
-
-      {/* Edit / Save / Cancel */}
-      {canEdit && (
-        <div className="mb-4 flex gap-2">
-          {editMode ? (
-            <button
-              onClick={() => setEditMode(false)}
-              className="px-3 py-1 bg-gray-300 rounded"
-            >
-              Exit Edit
-            </button>
-          ) : (
-            <button
-              onClick={() => setEditMode(true)}
-              className="px-3 py-1 bg-gray-200 rounded"
-            >
-              Edit List
-            </button>
-          )}
+      {/* Delete Confirmation Modal */}
+      {showConfirm && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={cancelDelete}
+        >
+          <div
+            className="bg-white rounded-lg p-6 w-80"
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold mb-4">Delete list?</h2>
+            {deleteError && (
+              <p className="text-sm text-red-500 mb-2">{deleteError}</p>
+            )}
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={cancelDelete}
+                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
+
+      {/* Title + Edit Controls row */}
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h3 className="text-xl font-semibold">{listState.title}</h3>
+          <div className="text-sm text-gray-600">
+            Category: <span className="font-medium">{listState.categoryId?.name}</span>
+          </div>
+        </div>
+
+        {canEdit && (
+          editMode ? (
+            <div className="flex gap-2">
+              <button
+                onClick={saveEdit}
+                disabled={saving}
+                className="mb-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                onClick={cancelEdit}
+                disabled={saving}
+                className="mb-2 px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={enterEditMode}
+              className="mb-2 px-3 py-2 bg-gray-200 rounded hover:bg-gray-300"
+            >
+              Edit
+            </button>
+          )
+        )}
+      </div>
 
       {/* Filters */}
       {canEdit && !editMode && (
@@ -172,36 +291,59 @@ export default function ListDetail({ list, user, onDelete }) {
 
       {/* Items */}
       <ul className="space-y-2 overflow-auto max-h-40 mb-4">
-        {displayItems.map(item => (
-          <li key={item._id} className="flex items-center">
-            <input
-              type="checkbox"
-              checked={item.done}
-              disabled={editMode || !(isOwner||collabUids.includes(user?.uid))}
-              onChange={async () => {
-                const res = await api.put(
-                  `/items/${item._id}`,
-                  { done: !item.done }
-                )
-                setAllItems(a =>
-                  a.map(i => i._id === item._id ? res.data : i)
-                )
-              }}
-              className="mr-2 h-5 w-5"
-            />
-            <span className={item.done ? 'line-through text-gray-500' : ''}>
-              {item.text}
-            </span>
-            {item.subCategory && (
-              <span className="ml-auto text-xs italic text-gray-700">
-                {item.subCategory}
+        {displayItems.map(item => {
+          const canRemoveItem = isOwner || item.addedBy === user?.uid
+          const isRemoved     = itemsToRemove.has(item._id)
+          return (
+            <li key={item._id} className="flex items-center">
+              <input
+                type="checkbox"
+                checked={item.done}
+                disabled={editMode || !(isOwner || collabUids.includes(user?.uid))}
+                onChange={async () => {
+                  const res = await api.put(
+                    `/items/${item._id}`,
+                    { done: !item.done }
+                  )
+                  setAllItems(a =>
+                    a.map(i => i._id === item._id ? res.data : i)
+                  )
+                }}
+                className="mr-2 h-5 w-5"
+              />
+              <span className={item.done ? 'line-through text-gray-500' : ''}>
+                {item.text}
               </span>
-            )}
-          </li>
-        ))}
+              {item.subCategory && (
+                <span className="ml-auto text-xs italic text-gray-700">
+                  {item.subCategory}
+                </span>
+              )}
+
+              {/* Remove / Undo in edit mode */}
+              {editMode && canRemoveItem && (
+                isRemoved ? (
+                  <button
+                    onClick={() => handleUndoRemove(item._id)}
+                    className="ml-2 text-yellow-600 text-sm"
+                  >
+                    Undo
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleRemoveItem(item._id)}
+                    className="ml-2 text-red-600 text-sm"
+                  >
+                    -
+                  </button>
+                )
+              )}
+            </li>
+          )
+        })}
       </ul>
 
-      {/* Add Item (edit mode) */}
+      {/* Add Item */}
       {canEdit && editMode && (
         <button
           onClick={() => setShowNewItem(true)}
@@ -216,6 +358,7 @@ export default function ListDetail({ list, user, onDelete }) {
         <div className="mb-4">
           <button
             onClick={() => setShowCollaborators(v => !v)}
+            disabled={editMode}
             className="text-sm text-gray-700 hover:underline mb-2"
           >
             {showCollaborators ? 'Hide Collaborators' : 'Show Collaborators'}
@@ -233,6 +376,7 @@ export default function ListDetail({ list, user, onDelete }) {
                       {isOwner && c.uid !== ownerUid && (
                         <button
                           onClick={() => handleRemoveCollaborator(c.uid)}
+                          disabled={editMode}
                           className="text-red-500 font-bold px-2 text-lg"
                           title="Remove collaborator"
                         >
@@ -243,7 +387,7 @@ export default function ListDetail({ list, user, onDelete }) {
                   ))}
                 </ul>
               ) : (
-                <div className="text-sm text-gray-500 mb-2">No collaborators</div>
+                <div className="text-sm text-gray-500">No collaborators</div>
               )}
               {isOwner && (
                 <form onSubmit={handleInvite} className="flex gap-2">
@@ -252,11 +396,13 @@ export default function ListDetail({ list, user, onDelete }) {
                     value={inviteEmail}
                     onChange={e => setInviteEmail(e.target.value)}
                     placeholder="Invite by email"
+                    disabled={editMode}
                     className="flex-1 border rounded px-2 py-1"
                     required
                   />
                   <button
                     type="submit"
+                    disabled={editMode}
                     className="bg-indigo-600 text-white px-4 py-1 rounded hover:bg-indigo-700 transition"
                   >
                     Invite
@@ -270,13 +416,13 @@ export default function ListDetail({ list, user, onDelete }) {
 
       {/* Public Toggle */}
       {isOwner && (
-        <label className="inline-flex items-center text-sm">
+        <label className="inline-flex items-center text-sm mb-4">
           <input
             type="checkbox"
             checked={listState.isPublic}
             onChange={handlePublicToggle}
+            disabled={!editMode}
             className="mr-2"
-            disabled={editMode}
           />
           Public
         </label>
